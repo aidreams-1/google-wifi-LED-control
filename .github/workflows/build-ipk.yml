@@ -20,172 +20,158 @@ jobs:
           ROOT=passwall-led
 
           rm -rf "$ROOT"
-          mkdir -p \
-            "$ROOT/data/usr/bin" \
-            "$ROOT/data/etc/init.d" \
-            "$ROOT/control"
+          mkdir -p "$ROOT/data/usr/bin" "$ROOT/data/etc/init.d" "$ROOT/control"
 
-          ############################
           # set_led_color.sh (AS-IS)
-          ############################
-          cat << 'EOF' > "$ROOT/data/usr/bin/set_led_color.sh"
-          #!/bin/sh
+          cat > "$ROOT/data/usr/bin/set_led_color.sh" <<'EOF'
+#!/bin/sh
 
-          LED_R="/sys/class/leds/LED0_Red/brightness"
-          LED_G="/sys/class/leds/LED0_Green/brightness"
-          LED_B="/sys/class/leds/LED0_Blue/brightness"
+LED_R="/sys/class/leds/LED0_Red/brightness"
+LED_G="/sys/class/leds/LED0_Green/brightness"
+LED_B="/sys/class/leds/LED0_Blue/brightness"
 
-          # Disable triggers
-          echo none > /sys/class/leds/LED0_Red/trigger 2>/dev/null
-          echo none > /sys/class/leds/LED0_Green/trigger 2>/dev/null
-          echo none > /sys/class/leds/LED0_Blue/trigger 2>/dev/null
+# Disable triggers
+echo none > /sys/class/leds/LED0_Red/trigger 2>/dev/null
+echo none > /sys/class/leds/LED0_Green/trigger 2>/dev/null
+echo none > /sys/class/leds/LED0_Blue/trigger 2>/dev/null
 
-          # Turn all off first
-          echo 0 > "$LED_R"
-          echo 0 > "$LED_G"
-          echo 0 > "$LED_B"
+# Turn all off first
+echo 0 > "$LED_R"
+echo 0 > "$LED_G"
+echo 0 > "$LED_B"
 
-          case "$1" in
-            red)
-              echo 255 > "$LED_R"
-              ;;
-            green)
-              echo 255 > "$LED_G"
-              ;;
-            yellow)
-              echo 255 > "$LED_R"
-              echo 255 > "$LED_G"
-              ;;
-            off)
-              ;;
-          esac
-          EOF
+case "$1" in
+  red)
+    echo 255 > "$LED_R"
+    ;;
+  green)
+    echo 255 > "$LED_G"
+    ;;
+  yellow)
+    echo 255 > "$LED_R"
+    echo 255 > "$LED_G"
+    ;;
+  off)
+    ;;
+esac
+EOF
 
-          ############################
           # passwall_led_daemon.sh (AS-IS)
-          ############################
-          cat << 'EOF' > "$ROOT/data/usr/bin/passwall_led_daemon.sh"
-          #!/bin/sh
+          cat > "$ROOT/data/usr/bin/passwall_led_daemon.sh" <<'EOF'
+#!/bin/sh
 
-          LED="/usr/bin/set_led_color.sh"
-          STATE_FILE="/tmp/led_blink_state"
+LED="/usr/bin/set_led_color.sh"
+STATE_FILE="/tmp/led_blink_state"
 
-          # -------- Ping targets --------
-          PING_WAN_IP="1.1.1.1"                 # internet alive
-          PING_VPN_HOST="www.youtube.com"       # vpn indicator
+# -------- Ping targets --------
+PING_WAN_IP="1.1.1.1"                 # internet alive
+PING_VPN_HOST="www.youtube.com"       # vpn indicator
 
-          # -------- Timings --------
-          SLEEP_BLINK=1
-          SLEEP_NORMAL=5
+# -------- Timings --------
+SLEEP_BLINK=1
+SLEEP_NORMAL=5
 
-          # -------- Latency thresholds --------
-          GOOD_MAX_MS=180
-          WARN_MAX_MS=350
+# -------- Latency thresholds --------
+GOOD_MAX_MS=180
+WARN_MAX_MS=350
 
-          # -------------------------------
-          # helper: slow red blink (1s/1s)
-          # -------------------------------
-          blink_red() {
-            if [ -f "$STATE_FILE" ]; then
-              rm -f "$STATE_FILE"
-              $LED off
-            else
-              touch "$STATE_FILE"
-              $LED red
-            fi
-          }
+# -------------------------------
+# helper: slow red blink (1s/1s)
+# -------------------------------
+blink_red() {
+  if [ -f "$STATE_FILE" ]; then
+    rm -f "$STATE_FILE"
+    $LED off
+  else
+    touch "$STATE_FILE"
+    $LED red
+  fi
+}
 
-          while true; do
+while true; do
 
-            # 1) WAN check (internet input)
-            ping -c 1 -W 1 "$PING_WAN_IP" >/dev/null 2>&1
-            if [ $? -ne 0 ]; then
-              blink_red
-              sleep "$SLEEP_BLINK"
-              continue
-            fi
+  # 1) WAN check (internet input)
+  ping -c 1 -W 1 "$PING_WAN_IP" >/dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    blink_red
+    sleep "$SLEEP_BLINK"
+    continue
+  fi
 
-            # WAN ok → stop blink state
-            rm -f "$STATE_FILE"
+  # WAN ok → stop blink state
+  rm -f "$STATE_FILE"
 
-            # 2) VPN reachability check (blocked host)
-            OUT_VPN="$(ping -c 1 -W 2 "$PING_VPN_HOST" 2>/dev/null)"
+  # 2) VPN reachability check (blocked host)
+  OUT_VPN="$(ping -c 1 -W 2 "$PING_VPN_HOST" 2>/dev/null)"
 
-            echo "$OUT_VPN" | grep -q "1 packets transmitted, 1 packets received"
-            if [ $? -ne 0 ]; then
-              # Internet ok but VPN not working
-              $LED red
-              sleep "$SLEEP_NORMAL"
-              continue
-            fi
+  echo "$OUT_VPN" | grep -q "1 packets transmitted, 1 packets received"
+  if [ $? -ne 0 ]; then
+    # Internet ok but VPN not working
+    $LED red
+    sleep "$SLEEP_NORMAL"
+    continue
+  fi
 
-            # 3) Quality check (latency from same ping)
-            AVG_MS="$(echo "$OUT_VPN" | grep -E 'round-trip|rtt' | awk -F'/' '{print $5}' | sed 's/ ms//')"
+  # 3) Quality check (latency from same ping)
+  AVG_MS="$(echo "$OUT_VPN" | grep -E 'round-trip|rtt' | awk -F'/' '{print $5}' | sed 's/ ms//')"
 
-            if [ -z "$AVG_MS" ]; then
-              $LED yellow
-              sleep "$SLEEP_NORMAL"
-              continue
-            fi
+  if [ -z "$AVG_MS" ]; then
+    $LED yellow
+    sleep "$SLEEP_NORMAL"
+    continue
+  fi
 
-            AVG_INT="$(printf "%.0f" "$AVG_MS")"
+  AVG_INT="$(printf "%.0f" "$AVG_MS")"
 
-            if [ "$AVG_INT" -le "$GOOD_MAX_MS" ]; then
-              $LED green
-            elif [ "$AVG_INT" -le "$WARN_MAX_MS" ]; then
-              $LED yellow
-            else
-              $LED red
-            fi
+  if [ "$AVG_INT" -le "$GOOD_MAX_MS" ]; then
+    $LED green
+  elif [ "$AVG_INT" -le "$WARN_MAX_MS" ]; then
+    $LED yellow
+  else
+    $LED red
+  fi
 
-            sleep "$SLEEP_NORMAL"
-          done
-          EOF
+  sleep "$SLEEP_NORMAL"
+done
+EOF
 
-          ############################
-          # init.d service (WRAPPER ONLY)
-          ############################
-          cat << 'EOF' > "$ROOT/data/etc/init.d/passwall-led"
-          #!/bin/sh /etc/rc.common
+          # init.d wrapper
+          cat > "$ROOT/data/etc/init.d/passwall-led" <<'EOF'
+#!/bin/sh /etc/rc.common
+START=99
+USE_PROCD=1
 
-          START=99
-          USE_PROCD=1
+start_service() {
+  procd_open_instance
+  procd_set_param command /usr/bin/passwall_led_daemon.sh
+  procd_set_param respawn
+  procd_close_instance
+}
 
-          start_service() {
-            procd_open_instance
-            procd_set_param command /usr/bin/passwall_led_daemon.sh
-            procd_set_param respawn
-            procd_close_instance
-          }
+stop_service() {
+  pkill -f passwall_led_daemon.sh
+}
+EOF
 
-          stop_service() {
-            pkill -f passwall_led_daemon.sh
-          }
-          EOF
-
-          ############################
           # control
-          ############################
-          cat << 'EOF' > "$ROOT/control/control"
-          Package: passwall-led
-          Version: 1.0
-          Architecture: all
-          Maintainer: aidreams
-          Description: Google WiFi LED monitor for Passwall2
-          EOF
+          cat > "$ROOT/control/control" <<'EOF'
+Package: passwall-led
+Version: 1.0
+Architecture: all
+Maintainer: aidreams
+Description: Google WiFi LED monitor for Passwall2
+EOF
 
-          ############################
           # postinst
-          ############################
-          cat << 'EOF' > "$ROOT/control/postinst"
-          #!/bin/sh
-          chmod +x /usr/bin/set_led_color.sh
-          chmod +x /usr/bin/passwall_led_daemon.sh
-          chmod +x /etc/init.d/passwall-led
-          /etc/init.d/passwall-led enable
-          /etc/init.d/passwall-led start
-          exit 0
-          EOF
+          cat > "$ROOT/control/postinst" <<'EOF'
+#!/bin/sh
+chmod +x /usr/bin/set_led_color.sh
+chmod +x /usr/bin/passwall_led_daemon.sh
+chmod +x /etc/init.d/passwall-led
+/etc/init.d/passwall-led enable
+/etc/init.d/passwall-led start
+exit 0
+EOF
 
           chmod +x "$ROOT/control/postinst"
           echo "2.0" > "$ROOT/debian-binary"
